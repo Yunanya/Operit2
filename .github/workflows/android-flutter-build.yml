@@ -94,6 +94,17 @@ jobs:
         with:
           node-version: 24
 
+      - name: Prepare plugin build dependencies
+        shell: pwsh
+        run: |
+          npm install --prefix .ci-tools/typescript --no-audit --no-fund typescript@5.9.3
+          if ($LASTEXITCODE -ne 0) { throw "typescript install failed" }
+          corepack enable pnpm
+          Push-Location plugins/packages/buildin/workflow
+          corepack pnpm install --frozen-lockfile
+          if ($LASTEXITCODE -ne 0) { throw "workflow plugin install failed" }
+          Pop-Location
+
       - name: Install Java
         uses: actions/setup-java@v4
         with:
