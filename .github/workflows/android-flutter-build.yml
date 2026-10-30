@@ -97,6 +97,8 @@ jobs:
       - name: Prepare plugin build dependencies
         shell: pwsh
         run: |
+          python -m venv .venv
+          if ($LASTEXITCODE -ne 0) { throw "venv creation failed" }
           npm install --prefix .ci-tools/typescript --no-audit --no-fund typescript@5.9.3
           if ($LASTEXITCODE -ne 0) { throw "typescript install failed" }
           corepack enable pnpm
