@@ -111,7 +111,9 @@ jobs:
       - name: Install Android NDK
         if: steps.v8cache.outputs.cache-hit != 'true'
         run: |
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$ANDROID_V8_NDK_VERSION" > /dev/null
+          set +o pipefail
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$ANDROID_V8_NDK_VERSION" > /dev/null || true
+          test -x "$ANDROID_HOME/ndk/$ANDROID_V8_NDK_VERSION/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang++"
           echo "OPERIT_ANDROID_V8_NDK=$ANDROID_HOME/ndk/$ANDROID_V8_NDK_VERSION" >> "$GITHUB_ENV"
 
       - name: Install Rust
