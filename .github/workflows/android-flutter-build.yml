@@ -65,16 +65,88 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  build-android:
-    needs: build-android-runtime
-    runs-on: windows-2025
+  build-android-v8:
+    runs-on: ubuntu-24.04
     timeout-minutes: 350
+    env:
+      PYTHONUTF8: "1"
+      RUST_TOOLCHAIN_VERSION: 1.95.0
+      ANDROID_V8_NDK_VERSION: 28.2.13676358
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android/sdk/ndk/2[0-7]* /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL /usr/local/share/boost /usr/share/swift /usr/local/share/powershell /usr/local/lib/node_modules || true
+          sudo docker image prune --all --force || true
+          df -h /
+
+      - name: Restore Android V8 artifacts
+        id: v8cache
+        uses: actions/cache@v4
+        with:
+          path: tools/release/work/android-v8/*/aarch64-linux-android
+          key: linux-android-v8-artifacts-ndk${{ env.ANDROID_V8_NDK_VERSION }}-${{ hashFiles('tools/build_scripts/prepare_android_v8.py', 'apps/flutter/native/operit-flutter-bridge/Cargo.lock') }}
+
+      - name: Install LLVM 21 (libclang, lld)
+        if: steps.v8cache.outputs.cache-hit != 'true'
+        run: |
+          wget -q https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 21
+          sudo apt-get install -y libclang-21-dev lld-21
+          lib=/usr/lib/llvm-21/lib
+          if ! ls $lib/libclang.so.2[1-9]* >/dev/null 2>&1; then
+            src=$(ls $lib/libclang-21.so.* /usr/lib/x86_64-linux-gnu/libclang-21.so.* 2>/dev/null | head -n1)
+            sudo ln -sf "$src" $lib/libclang.so.21
+          fi
+          ls -l $lib/libclang* /usr/lib/llvm-21/bin/ld.lld
+
+      - name: Install Android NDK
+        if: steps.v8cache.outputs.cache-hit != 'true'
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$ANDROID_V8_NDK_VERSION" > /dev/null
+          echo "OPERIT_ANDROID_V8_NDK=$ANDROID_HOME/ndk/$ANDROID_V8_NDK_VERSION" >> "$GITHUB_ENV"
+
+      - name: Install Rust
+        if: steps.v8cache.outputs.cache-hit != 'true'
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN_VERSION }}
+          targets: aarch64-linux-android
+
+      - name: Build Android V8 from source
+        if: steps.v8cache.outputs.cache-hit != 'true'
+        run: |
+          python3 tools/build_scripts/prepare_android_v8.py --target aarch64-linux-android --env-file "$RUNNER_TEMP/v8.env"
+          cat "$RUNNER_TEMP/v8.env"
+          rm -rf tools/release/work/android-v8/*/build tools/release/work/android-v8/*/probe
+
+      - name: Upload Android V8 artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: operit2-android-v8-${{ github.sha }}
+          path: tools/release/work/android-v8/*/aarch64-linux-android/
+          if-no-files-found: error
+          retention-days: 3
+
+  build-android:
+    needs: [build-android-runtime, build-android-v8]
+    runs-on: windows-2025
+    timeout-minutes: 120
     env:
       PYTHONUTF8: "1"
       PYTHONIOENCODING: utf-8
       RUSTFLAGS: -Awarnings
       RUST_TOOLCHAIN_VERSION: 1.95.0
       FVM_VERSION: 4.3.0
+      ANDROID_V8_NDK_VERSION: 28.2.13676358
 
     steps:
       - name: Checkout
@@ -183,12 +255,21 @@ jobs:
           RELEASE_KEY_PASSWORD=$env:ANDROID_RELEASE_KEY_PASSWORD
           "@ | Set-Content -Path (Join-Path $secretsDir "android-signing.properties") -Encoding utf8
 
-      - name: Cache source-built Android V8
-        id: v8cache
-        uses: actions/cache/restore@v4
+      - name: Download Linux-built Android V8
+        uses: actions/download-artifact@v4
         with:
+          name: operit2-android-v8-${{ github.sha }}
           path: tools/release/work/android-v8
-          key: ${{ runner.os }}-${{ runner.arch }}-android-v8-${{ hashFiles('tools/build_scripts/prepare_android_v8.py', 'apps/flutter/native/operit-flutter-bridge/Cargo.lock') }}
+
+      - name: Pin Android NDK for V8 cache match
+        shell: pwsh
+        run: |
+          $sdkmanager = Join-Path $env:ANDROID_HOME "cmdline-tools\latest\bin\sdkmanager.bat"
+          "y`ny`ny`ny`n" | & $sdkmanager --install "ndk;$env:ANDROID_V8_NDK_VERSION" | Out-Null
+          $ndk = Join-Path $env:ANDROID_HOME "ndk\$env:ANDROID_V8_NDK_VERSION"
+          if (-not (Test-Path -LiteralPath $ndk)) { throw "NDK not installed at $ndk" }
+          "OPERIT_ANDROID_V8_NDK=$ndk" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Get-ChildItem -Recurse tools/release/work/android-v8 | Select-Object FullName, Length
 
       - name: Check build environment
         shell: pwsh
@@ -202,13 +283,6 @@ jobs:
             throw "apps/flutter/app/pubspec.yaml must contain exactly one release version line"
           }
           python tools/build_scripts/build_flutter_android.py --build-name $version[0].Groups[1].Value --build-number $version[0].Groups[2].Value --enforce-lockfile
-
-      - name: Save source-built Android V8 cache
-        if: always() && steps.v8cache.outputs.cache-hit != 'true' && hashFiles('tools/release/work/android-v8/**/*.a', 'tools/release/work/android-v8/**/*.lib') != ''
-        uses: actions/cache/save@v4
-        with:
-          path: tools/release/work/android-v8
-          key: ${{ steps.v8cache.outputs.cache-primary-key }}
 
       - name: Upload Android artifacts
         uses: actions/upload-artifact@v4
