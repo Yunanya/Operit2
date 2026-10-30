@@ -45,8 +45,15 @@ $items = @(
 foreach ($item in $items) {
     $archivePath = Join-Path $downloadsDir $item.Archive
     Write-Host "Downloading $($item.Name)"
+    $vendored = Join-Path (Join-Path $runtimeDir "vendor") $item.Archive
     $urls = @($item.Url) + @($item.Mirrors)
+    if (Test-Path -LiteralPath $vendored) {
+        Write-Host "Using vendored $($item.Archive)"
+        Copy-Item -LiteralPath $vendored -Destination $archivePath -Force
+        $urls = @()
+    }
     $downloaded = $false
+    if ($urls.Count -eq 0) { $downloaded = $true }
     for ($attempt = 1; $attempt -le 4 -and -not $downloaded; $attempt++) {
         foreach ($url in $urls) {
             try {
