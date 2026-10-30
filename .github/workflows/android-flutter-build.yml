@@ -68,7 +68,7 @@ jobs:
   build-android:
     needs: build-android-runtime
     runs-on: windows-2025
-    timeout-minutes: 90
+    timeout-minutes: 350
     env:
       PYTHONUTF8: "1"
       PYTHONIOENCODING: utf-8
@@ -184,7 +184,8 @@ jobs:
           "@ | Set-Content -Path (Join-Path $secretsDir "android-signing.properties") -Encoding utf8
 
       - name: Cache source-built Android V8
-        uses: actions/cache@v4
+        id: v8cache
+        uses: actions/cache/restore@v4
         with:
           path: tools/release/work/android-v8
           key: ${{ runner.os }}-${{ runner.arch }}-android-v8-${{ hashFiles('tools/build_scripts/prepare_android_v8.py', 'apps/flutter/native/operit-flutter-bridge/Cargo.lock') }}
@@ -201,6 +202,13 @@ jobs:
             throw "apps/flutter/app/pubspec.yaml must contain exactly one release version line"
           }
           python tools/build_scripts/build_flutter_android.py --build-name $version[0].Groups[1].Value --build-number $version[0].Groups[2].Value --enforce-lockfile
+
+      - name: Save source-built Android V8 cache
+        if: always() && steps.v8cache.outputs.cache-hit != 'true' && hashFiles('tools/release/work/android-v8/**/*.a', 'tools/release/work/android-v8/**/*.lib') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: tools/release/work/android-v8
+          key: ${{ steps.v8cache.outputs.cache-primary-key }}
 
       - name: Upload Android artifacts
         uses: actions/upload-artifact@v4
