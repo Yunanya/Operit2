@@ -148,13 +148,19 @@ jobs:
             "ANDROID_RELEASE_KEY_PASSWORD"
           )
           $missing = $required | Where-Object { [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($_)) }
-          if ($missing.Count -gt 0) {
-            throw "Missing required GitHub Actions secrets: $($missing -join ', ')"
-          }
           $secretsDir = "tools/release/secrets"
           New-Item -ItemType Directory -Force -Path $secretsDir | Out-Null
           $keystore = Join-Path $secretsDir "operit2-release.keystore"
-          [System.IO.File]::WriteAllBytes($keystore, [System.Convert]::FromBase64String($env:ANDROID_RELEASE_KEYSTORE_BASE64))
+          if ($missing.Count -gt 0) {
+            Write-Host "Signing secrets missing ($($missing -join ', ')); generating a throwaway keystore for this fork build."
+            $env:ANDROID_RELEASE_STORE_PASSWORD = "operit2fork"
+            $env:ANDROID_RELEASE_KEY_PASSWORD = "operit2fork"
+            $env:ANDROID_RELEASE_KEY_ALIAS = "operit2fork"
+            & keytool -genkeypair -v -keystore $keystore -storetype PKCS12 -alias operit2fork -keyalg RSA -keysize 2048 -validity 10000 -storepass operit2fork -keypass operit2fork -dname "CN=Operit2 Fork, O=Yunanya, C=CN"
+            if ($LASTEXITCODE -ne 0) { throw "keytool failed" }
+          } else {
+            [System.IO.File]::WriteAllBytes($keystore, [System.Convert]::FromBase64String($env:ANDROID_RELEASE_KEYSTORE_BASE64))
+          }
           @"
           RELEASE_STORE_FILE=operit2-release.keystore
           RELEASE_STORE_PASSWORD=$env:ANDROID_RELEASE_STORE_PASSWORD
