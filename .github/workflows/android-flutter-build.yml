@@ -243,12 +243,11 @@ jobs:
           New-Item -ItemType Directory -Force -Path $secretsDir | Out-Null
           $keystore = Join-Path $secretsDir "operit2-release.keystore"
           if ($missing.Count -gt 0) {
-            Write-Host "Signing secrets missing ($($missing -join ', ')); generating a throwaway keystore for this fork build."
-            $env:ANDROID_RELEASE_STORE_PASSWORD = "operit2fork"
-            $env:ANDROID_RELEASE_KEY_PASSWORD = "operit2fork"
-            $env:ANDROID_RELEASE_KEY_ALIAS = "operit2fork"
-            & keytool -genkeypair -v -keystore $keystore -storetype PKCS12 -alias operit2fork -keyalg RSA -keysize 2048 -validity 10000 -storepass operit2fork -keypass operit2fork -dname "CN=Operit2 Fork, O=Yunanya, C=CN"
-            if ($LASTEXITCODE -ne 0) { throw "keytool failed" }
+            Write-Host "Signing secrets missing ($($missing -join ', ')); using the fork's fixed keystore so every build keeps the same signature."
+            Copy-Item ".github/signing/operit2-fork.keystore" $keystore -Force
+            $env:ANDROID_RELEASE_STORE_PASSWORD = "df9f3d5e5738ccb87614b006"
+            $env:ANDROID_RELEASE_KEY_PASSWORD = "df9f3d5e5738ccb87614b006"
+            $env:ANDROID_RELEASE_KEY_ALIAS = "operit2"
           } else {
             [System.IO.File]::WriteAllBytes($keystore, [System.Convert]::FromBase64String($env:ANDROID_RELEASE_KEYSTORE_BASE64))
           }
@@ -305,5 +304,5 @@ jobs:
           $version = (Select-String -Path apps/flutter/app/pubspec.yaml -Pattern '^version:\s*(\d+\.\d+\.\d+)\+(\d+)\s*$').Matches[0]
           $short = "${{ github.sha }}".Substring(0, 7)
           $tag = "android-v$($version.Groups[1].Value)-$($version.Groups[2].Value)-$short"
-          gh release create $tag $apk.FullName --repo "${{ github.repository }}" --target "${{ github.sha }}" --title "Operit2 Android $($version.Groups[1].Value) ($short)" --notes "Fork build of Operit2 for Android arm64-v8a. Signed with a throwaway key: uninstall any officially signed build before installing."
+          gh release create $tag $apk.FullName --repo "${{ github.repository }}" --target "${{ github.sha }}" --title "Operit2 Android $($version.Groups[1].Value) ($short)" --notes "Fork build of Operit2 for Android arm64-v8a. Signed with the fork's fixed key (SHA-256 C0:89:CC:02...D2:9F); later fork builds install over this one."
           if ($LASTEXITCODE -ne 0) { throw "gh release create failed" }
