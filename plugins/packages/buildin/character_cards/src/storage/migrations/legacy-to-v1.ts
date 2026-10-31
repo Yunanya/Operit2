@@ -60,8 +60,14 @@ function assertMigrationPlan(value: unknown): asserts value is MigrationPlan {
 }
 
 /** Requires the host to report a successful file mutation. */
-function completed(result: { successful: boolean; details: string }): void {
-  if (!result.successful) throw new Error(result.details);
+function completed(result: unknown): void {
+  // Files.write resolves to FileApplyResultData, whose outcome is nested in `operation`;
+  // mkdir/copy/delete resolve to flat FileOperationData. Accept both shapes.
+  const value = result as { operation?: unknown } | null;
+  const operation = (value !== null && typeof value === "object" && typeof value.operation === "object" && value.operation !== null
+    ? value.operation : value) as { successful?: unknown; details?: unknown } | null;
+  if (operation === null || typeof operation !== "object" || operation.successful !== true)
+    throw new Error(typeof operation?.details === "string" && operation.details !== "" ? operation.details : "File operation failed");
 }
 
 /** Resolves a declared plugin-relative resource without permitting directory traversal. */

@@ -2701,7 +2701,9 @@ function assertMigrationPlan(value) {
   if (value.cursor > lengths[value.phase]) throw new Error("Character migration cursor exceeds its work");
 }
 function completed(result2) {
-  if (!result2.successful) throw new Error(result2.details);
+  const operation = result2 !== null && typeof result2 === "object" && typeof result2.operation === "object" && result2.operation !== null ? result2.operation : result2;
+  if (operation === null || typeof operation !== "object" || operation.successful !== true)
+    throw new Error(typeof (operation == null ? void 0 : operation.details) === "string" && operation.details !== "" ? operation.details : "File operation failed");
 }
 function absolute(directory, relative) {
   if (relative.split("/").some((part) => part === "" || part === "." || part === ".." || /[\\:\u0000-\u001f]/u.test(part)))
@@ -4773,7 +4775,9 @@ var RepositorySession = class extends DatabaseMemoryRepository {
 
 // src/storage/database.ts
 function completed2(result2) {
-  if (!result2.successful) throw new Error(result2.details);
+  const operation = result2 !== null && typeof result2 === "object" && typeof result2.operation === "object" && result2.operation !== null ? result2.operation : result2;
+  if (operation === null || typeof operation !== "object" || operation.successful !== true)
+    throw new Error(typeof (operation == null ? void 0 : operation.details) === "string" && operation.details !== "" ? operation.details : "File operation failed");
 }
 var HOST_OBJECT_COMMIT_LIMIT = 1e3;
 var HOST_COMMIT_NODE_LIMIT = 4e5;
@@ -4812,7 +4816,20 @@ var DatabaseCharacterRepository = class _DatabaseCharacterRepository {
       const storage = yield CharacterStorage.open();
       const repository2 = new _DatabaseCharacterRepository(storage, directory, directories2);
       const existing = (yield storage.metadata.data()).get("state");
-      if (existing === void 0) {
+      const leftover = existing === void 0 ? yield storage.data() : null;
+      const leftoverCard = leftover === null ? void 0 : leftover.cards.entries().find(([key]) => key.startsWith(recordPrefix));
+      if (leftover !== null && configurationNames.some((name) => leftover[name].entries().some(([key]) => key.startsWith(recordPrefix)))) {
+        const defaults = createInitialState(Date.now());
+        yield storage.metadata.edit((preferences) => {
+          if (preferences.contains("state")) return;
+          preferences.set("state", {
+            version: defaults.version,
+            active: leftoverCard === void 0 ? null : { CharacterCard: { id: leftoverCard[0].slice(recordPrefix.length) } },
+            memoryPreferences: storedValue(defaults.memoryPreferences),
+            memoryRecall: storedValue(defaults.memoryRecall)
+          });
+        });
+      } else if (existing === void 0) {
         const state = createInitialState(Date.now());
         for (const name of configurationNames) {
           yield storage.configuration[name].edit((preferences) => {

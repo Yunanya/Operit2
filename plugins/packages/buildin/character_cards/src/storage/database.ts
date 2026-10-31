@@ -49,8 +49,14 @@ import {
 import { userDocumentPath } from "./state";
 
 /** Requires the original Files operation result for actual user document writes. */
-function completed(result: { successful: boolean; details: string }): void {
-  if (!result.successful) throw new Error(result.details);
+function completed(result: unknown): void {
+  // Files.write resolves to FileApplyResultData, whose outcome is nested in `operation`;
+  // mkdir/copy/delete resolve to flat FileOperationData. Accept both shapes.
+  const value = result as { operation?: unknown } | null;
+  const operation = (value !== null && typeof value === "object" && typeof value.operation === "object" && value.operation !== null
+    ? value.operation : value) as { successful?: unknown; details?: unknown } | null;
+  if (operation === null || typeof operation !== "object" || operation.successful !== true)
+    throw new Error(typeof operation?.details === "string" && operation.details !== "" ? operation.details : "File operation failed");
 }
 
 /** Matches the host's per-transaction object-commit ceiling for plugin records. */
@@ -111,7 +117,22 @@ export class DatabaseCharacterRepository implements CharacterRepositoryOwner {
     const storage = await CharacterStorage.open();
     const repository = new DatabaseCharacterRepository(storage, directory, directories);
     const existing = (await storage.metadata.data()).get<Storage.Value>("state");
-    if (existing === undefined) {
+    const leftover = existing === undefined ? await storage.data() : null;
+    const leftoverCard = leftover === null ? undefined : leftover.cards.entries().find(([key]) => key.startsWith(recordPrefix));
+    if (leftover !== null && configurationNames.some(name => leftover[name].entries().some(([key]) => key.startsWith(recordPrefix)))) {
+      // An earlier first install wrote its records but stopped before the final metadata write.
+      // Adopt those records instead of failing every later start with "found existing configuration".
+      const defaults = createInitialState(Date.now());
+      await storage.metadata.edit(preferences => {
+        if (preferences.contains("state")) return;
+        preferences.set("state", {
+          version: defaults.version,
+          active: leftoverCard === undefined ? null : { CharacterCard: { id: leftoverCard[0].slice(recordPrefix.length) } },
+          memoryPreferences: storedValue(defaults.memoryPreferences),
+          memoryRecall: storedValue(defaults.memoryRecall),
+        });
+      });
+    } else if (existing === undefined) {
       const state = createInitialState(Date.now());
       for (const name of configurationNames) {
         await storage.configuration[name].edit(preferences => {
